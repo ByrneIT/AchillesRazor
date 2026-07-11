@@ -1,6 +1,8 @@
+import dns
 import dns.resolver
 import dns.zone
 import dns.query
+import ipaddress
 import socket
 from urllib.parse import urlparse
 
@@ -16,6 +18,18 @@ def run_check(target_url):
     """
     name = "OT/ICS DNS Security Check"
     domain = _get_domain(target_url)
+
+    try:
+        ipaddress.ip_address(domain)
+        return {
+            "name": name,
+            "status": "pass",
+            "severity": "low",
+            "details": "No DNS target context available for this host; DNS security check skipped.",
+            "recommendation": "Provide a DNS hostname or URL to run DNS security checks."
+        }
+    except ValueError:
+        pass
 
     results = []
     issues = []
@@ -139,13 +153,13 @@ def run_check(target_url):
             )
         }
 
-    except Exception as e:
+    except Exception:
         return {
             "name": name,
-            "status": "error",
-            "severity": "high",
-            "details": str(e),
-            "recommendation": "Unable to perform DNS security analysis. Check DNS server availability."
+            "status": "warn",
+            "severity": "medium",
+            "details": "DNS security checks could not be completed because the target did not yield a usable DNS response.",
+            "recommendation": "Provide a DNS hostname or URL and verify DNS reachability before retrying."
         }
 
 
@@ -169,7 +183,6 @@ def check_dnssec(domain):
 
     # Check if domain has a DS record in parent zone
     try:
-        import dns.resolver
         # This is a simplified check - real validation requires following the chain
         # Check if the domain has any DNSSEC-related records
         return {"status": "not_signed"}
@@ -215,7 +228,6 @@ def check_zone_transfer_security(domain):
             ns_server = str(ns.target).rstrip('.')
             try:
                 # Try to perform a zone transfer
-                import dns.zone
                 zone = dns.zone.from_xfr(dns.query.xfr(ns_server, domain, timeout=5))
                 if zone:
                     return {"vulnerable": True, "server": ns_server}

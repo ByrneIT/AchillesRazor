@@ -5,7 +5,7 @@ from typing import Dict, Any, List, Optional
 
 class ICSReportGenerator:
     """
-    OT/ICS Security Scanner Report Generator
+    AchillesRazor Report Generator
     Produces reports in multiple formats: JSON, HTML, Markdown, Console
     """
 
@@ -377,7 +377,7 @@ class ICSReportGenerator:
         </table>
 
         <div class="footer">
-            ICS Security Scanner v1.0.0 | Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+            AchillesRazor v1.0.0 | Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         </div>
     </div>
 </body>

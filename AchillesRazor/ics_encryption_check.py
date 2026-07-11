@@ -3,6 +3,29 @@ import socket
 from datetime import datetime
 import time
 
+
+def _port_open(ip, port, timeout=2, udp=False):
+    """Return True when a TCP/UDP port is reachable on the target."""
+    try:
+        if udp:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(timeout)
+            sock.sendto(b"\x00", (ip, port))
+            try:
+                sock.recvfrom(1024)
+            except socket.timeout:
+                sock.close()
+                return False
+            sock.close()
+            return True
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        result = sock.connect_ex((ip, port))
+        sock.close()
+        return result == 0
+    except Exception:
+        return False
+
 # -----------------------------------------------------------------
 # OT/ICS Protocol Encryption Check
 # Merges ssl_check.py (certificate validation) and tls_check.py (TLS version/cipher)
@@ -222,6 +245,9 @@ def check_modbus_encryption(ip):
     Check Modbus encryption support
     Modbus/TLS (port 802) is the secure variant
     """
+    if not _port_open(ip, 502):
+        return None
+
     result = {
         "protocol": "Modbus",
         "port": 502,
@@ -254,6 +280,9 @@ def check_s7_encryption(ip):
     Check Siemens S7 encryption support
     S7-1200/1500 support TLS on port 102
     """
+    if not _port_open(ip, 102):
+        return None
+
     result = {
         "protocol": "S7",
         "port": 102,
@@ -285,6 +314,9 @@ def check_dnp3_encryption(ip):
     Check DNP3 encryption support
     DNP3 has optional authentication but no native encryption
     """
+    if not _port_open(ip, 20000):
+        return None
+
     result = {
         "protocol": "DNP3",
         "port": 20000,
@@ -306,6 +338,9 @@ def check_cip_encryption(ip):
     Check CIP/EtherNet/IP encryption support
     CIP Security (CIP-S) is the secure variant
     """
+    if not _port_open(ip, 44818):
+        return None
+
     result = {
         "protocol": "CIP",
         "port": 44818,
@@ -327,6 +362,9 @@ def check_bacnet_encryption(ip):
     Check BACnet encryption support
     BACnet/SC is the secure variant (TLS)
     """
+    if not _port_open(ip, 47808, udp=True):
+        return None
+
     result = {
         "protocol": "BACnet",
         "port": 47808,
@@ -357,6 +395,9 @@ def check_opcua_encryption(ip):
     Check OPC-UA encryption support
     OPC-UA has built-in security with TLS
     """
+    if not _port_open(ip, 4840):
+        return None
+
     result = {
         "protocol": "OPC-UA",
         "port": 4840,
@@ -386,6 +427,9 @@ def check_iec104_encryption(ip):
     Check IEC 60870-5-104 encryption support
     No native encryption
     """
+    if not _port_open(ip, 2404):
+        return None
+
     result = {
         "protocol": "IEC-104",
         "port": 2404,

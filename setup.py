@@ -4,13 +4,13 @@ with open("README.md", "r", encoding="utf-8") as f:
     long_description = f.read()
 
 setup(
-    name="ics-scanner",
+    name="AchillesRazor",
     version="1.0.0",
-    author="Your Name",
-    description="OT/ICS Security Scanner - Comprehensive ICS security assessment suite",
+    author="ByrneIT",
+    description="AchillesRazor - Comprehensive OT/ICS security assessment suite",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/ics-scanner",
+    url="https://github.com/ByrneIT/AchillesRazor",
     packages=find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
@@ -25,7 +25,8 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "ics-scan=ics_scanner.ics_main:main",
+            "achillesrazor=AchillesRazor.ics_main:main",
+            "AR=AchillesRazor.ics_main:main",
         ],
     },
 )

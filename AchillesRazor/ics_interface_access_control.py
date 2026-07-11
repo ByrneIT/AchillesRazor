@@ -1,6 +1,30 @@
 import socket
 import time
 
+
+def _port_open(ip, port, timeout=2, udp=False):
+    """Return True when a TCP/UDP port is reachable on the target."""
+    try:
+        if udp:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(timeout)
+            sock.sendto(b"\x00", (ip, port))
+            try:
+                sock.recvfrom(1024)
+            except socket.timeout:
+                sock.close()
+                return False
+            sock.close()
+            return True
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        result = sock.connect_ex((ip, port))
+        sock.close()
+        return result == 0
+    except Exception:
+        return False
+
+
 def run_check(target_ip, target_port=None):
     """
     OT/ICS Interface Access Control Check
@@ -93,6 +117,9 @@ def check_modbus_access(ip):
     """
     Check Modbus access controls
     """
+    if not _port_open(ip, 502):
+        return None
+
     result = {
         "protocol": "Modbus",
         "access_status": "Unknown",
@@ -115,6 +142,9 @@ def check_s7_access(ip):
     """
     Check S7 access controls
     """
+    if not _port_open(ip, 102):
+        return None
+
     result = {
         "protocol": "S7",
         "access_status": "Unknown",
@@ -160,6 +190,9 @@ def check_dnp3_access(ip):
     """
     Check DNP3 access controls
     """
+    if not _port_open(ip, 20000):
+        return None
+
     result = {
         "protocol": "DNP3",
         "access_status": "Unknown",
@@ -181,6 +214,9 @@ def check_cip_access(ip):
     """
     Check CIP access controls
     """
+    if not _port_open(ip, 44818):
+        return None
+
     result = {
         "protocol": "CIP",
         "access_status": "Unknown",
@@ -202,6 +238,9 @@ def check_bacnet_access(ip):
     """
     Check BACnet access controls
     """
+    if not _port_open(ip, 47808, udp=True):
+        return None
+
     result = {
         "protocol": "BACnet",
         "access_status": "Unknown",
@@ -223,6 +262,9 @@ def check_opcua_access(ip):
     """
     Check OPC-UA access controls
     """
+    if not _port_open(ip, 4840):
+        return None
+
     result = {
         "protocol": "OPC-UA",
         "access_status": "Unknown",
@@ -259,6 +301,9 @@ def check_iec104_access(ip):
     """
     Check IEC-104 access controls
     """
+    if not _port_open(ip, 2404):
+        return None
+
     result = {
         "protocol": "IEC-104",
         "access_status": "Unknown",

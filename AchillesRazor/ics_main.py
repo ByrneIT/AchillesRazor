@@ -28,6 +28,8 @@ SCAN_TYPE_ALIASES = {
     "exposure": "exposure",
     "dns-discover": "dns_discovery",
     "dns_discovery": "dns_discovery",
+    "dns-sec": "dns_security",
+    "dns_security": "dns_security",
     "probe": "discovery_probe",
     "protocol-sec": "protocol_security",
     "protocol_security": "protocol_security",
@@ -235,6 +237,18 @@ def detect_output_format(output_path: Optional[str], override_format: Optional[s
     return "console"
 
 
+def list_checks() -> None:
+    """Print all supported scan type names and aliases."""
+    print("\nAvailable scan types:")
+    print("-" * 40)
+    for scan_type in sorted(VALID_SCAN_TYPES):
+        if scan_type in SCAN_TYPE_ALIASES and SCAN_TYPE_ALIASES[scan_type] is not None:
+            print(f"  - {scan_type} -> {SCAN_TYPE_ALIASES[scan_type]}")
+        else:
+            print(f"  - {scan_type}")
+    print("-" * 40)
+
+
 def parse_arguments():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(
@@ -249,6 +263,7 @@ Examples:
 
     parser.add_argument(
         "target",
+        nargs="?",
         help="Target IP address, hostname, URL, or CIDR network"
     )
     parser.add_argument(
@@ -273,13 +288,32 @@ Examples:
         type=int,
         help="Target port (default: scan common OT ports 502, 102, etc.)"
     )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Enable verbose output during scans"
+    )
+    parser.add_argument(
+        "--list-checks",
+        action="store_true",
+        help="List all available scan types and exit"
+    )
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    if not args.list_checks and not args.target:
+        parser.error("the following arguments are required: target")
+    return args
 
 
 def main():
     """Main entry point"""
     args = parse_arguments()
+
+    if args.list_checks:
+        list_checks()
+        return 0
+
     target = args.target
     output_path = args.output
     output_format = detect_output_format(output_path, args.format)
@@ -292,7 +326,7 @@ def main():
             target,
             ports=[args.port] if args.port else None,
             checks=checks,
-            verbose=False,
+            verbose=args.verbose,
         )
 
         flattened_results = []
@@ -336,7 +370,7 @@ def main():
         target,
         port=args.port,
         checks=checks,
-        verbose=False,
+        verbose=args.verbose,
     )
 
     if output_format == "console":

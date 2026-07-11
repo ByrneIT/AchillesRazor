@@ -1,6 +1,30 @@
 import socket
 import time
 
+
+def _port_open(ip, port, timeout=2, udp=False):
+    """Return True when a TCP/UDP port is reachable on the target."""
+    try:
+        if udp:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(timeout)
+            sock.sendto(b"\x00", (ip, port))
+            try:
+                sock.recvfrom(1024)
+            except socket.timeout:
+                sock.close()
+                return False
+            sock.close()
+            return True
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        result = sock.connect_ex((ip, port))
+        sock.close()
+        return result == 0
+    except Exception:
+        return False
+
+
 def run_check(target_ip, target_port=None):
     """
     OT/ICS Security Policy Check
@@ -91,6 +115,9 @@ def check_modbus_policy(ip):
     Check Modbus security policy
     Equivalent to checking CSP for "unsafe-inline" patterns
     """
+    if not _port_open(ip, 502):
+        return None
+
     result = {
         "protocol": "Modbus",
         "port": 502,
@@ -131,6 +158,9 @@ def check_s7_policy(ip):
     """
     Check Siemens S7 security policy
     """
+    if not _port_open(ip, 102):
+        return None
+
     result = {
         "protocol": "S7",
         "port": 102,
@@ -164,6 +194,9 @@ def check_dnp3_policy(ip):
     """
     Check DNP3 security policy
     """
+    if not _port_open(ip, 20000):
+        return None
+
     result = {
         "protocol": "DNP3",
         "port": 20000,
@@ -192,6 +225,9 @@ def check_cip_policy(ip):
     """
     Check EtherNet/IP (CIP) security policy
     """
+    if not _port_open(ip, 44818):
+        return None
+
     result = {
         "protocol": "CIP/EtherNet/IP",
         "port": 44818,
@@ -217,6 +253,9 @@ def check_bacnet_policy(ip):
     """
     Check BACnet security policy
     """
+    if not _port_open(ip, 47808, udp=True):
+        return None
+
     result = {
         "protocol": "BACnet",
         "port": 47808,
@@ -242,6 +281,9 @@ def check_opcua_policy(ip):
     """
     Check OPC-UA security policy
     """
+    if not _port_open(ip, 4840):
+        return None
+
     result = {
         "protocol": "OPC-UA",
         "port": 4840,

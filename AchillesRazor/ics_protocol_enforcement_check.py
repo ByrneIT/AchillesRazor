@@ -1,6 +1,30 @@
 import socket
 import time
 
+
+def _port_open(ip, port, timeout=2, udp=False):
+    """Return True when a TCP/UDP port is reachable on the target."""
+    try:
+        if udp:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(timeout)
+            sock.sendto(b"\x00", (ip, port))
+            try:
+                sock.recvfrom(1024)
+            except socket.timeout:
+                sock.close()
+                return False
+            sock.close()
+            return True
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        result = sock.connect_ex((ip, port))
+        sock.close()
+        return result == 0
+    except Exception:
+        return False
+
+
 def run_check(target_ip, target_port=None):
     """
     OT/ICS Protocol Enforcement Check
@@ -111,6 +135,9 @@ def check_modbus_enforcement(ip):
     Check if Modbus enforces secure connections
     Modbus/TLS (port 802) is the secure variant, but rarely used
     """
+    if not _port_open(ip, 502) and not _port_open(ip, 802):
+        return None
+
     result = {
         "protocol": "Modbus",
         "port": 502,
@@ -151,6 +178,9 @@ def check_s7_enforcement(ip):
     Check if Siemens S7 enforces secure connections
     S7-1200/1500 support TLS on port 102
     """
+    if not _port_open(ip, 102) and not test_tls_port(ip, 102):
+        return None
+
     result = {
         "protocol": "S7",
         "port": 102,
@@ -193,6 +223,9 @@ def check_dnp3_enforcement(ip):
     Check if DNP3 enforces secure connections
     DNP3 has a security extension but rarely used
     """
+    if not _port_open(ip, 20000):
+        return None
+
     result = {
         "protocol": "DNP3",
         "port": 20000,
@@ -221,6 +254,9 @@ def check_cip_enforcement(ip):
     Check if CIP/EtherNet/IP enforces secure connections
     CIP Security (CIP-S) is the secure variant
     """
+    if not _port_open(ip, 44818):
+        return None
+
     result = {
         "protocol": "CIP",
         "port": 44818,
@@ -248,6 +284,9 @@ def check_bacnet_enforcement(ip):
     Check if BACnet enforces secure connections
     BACnet/SC is the secure variant (TLS)
     """
+    if not _port_open(ip, 47808, udp=True):
+        return None
+
     result = {
         "protocol": "BACnet",
         "port": 47808,
@@ -281,6 +320,9 @@ def check_opcua_enforcement(ip):
     Check if OPC-UA enforces secure connections
     OPC-UA has built-in security and can enforce encryption/signing
     """
+    if not _port_open(ip, 4840):
+        return None
+
     result = {
         "protocol": "OPC-UA",
         "port": 4840,
@@ -313,6 +355,9 @@ def check_iec104_enforcement(ip):
     """
     Check if IEC 60870-5-104 enforces secure connections
     """
+    if not _port_open(ip, 2404):
+        return None
+
     result = {
         "protocol": "IEC-104",
         "port": 2404,

@@ -1,5 +1,5 @@
 """
-ICS Security Scanner - A comprehensive OT/ICS security assessment suite
+AchillesRazor - A comprehensive OT/ICS security assessment suite
 """
 
 __version__ = "1.0.0"

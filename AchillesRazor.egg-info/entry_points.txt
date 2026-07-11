@@ -1,0 +1,3 @@
+[console_scripts]
+AR = AchillesRazor.ics_main:main
+achillesrazor = AchillesRazor.ics_main:main

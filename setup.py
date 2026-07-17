@@ -6,7 +6,7 @@ with open("README.md", "r", encoding="utf-8") as f:
 setup(
     name="AchillesRazor",
     version="1.0.0",
-    author="ByrneIT",
+    author="Allen Byrne (aka Cybershoresy)",
     description="AchillesRazor - Comprehensive OT/ICS security assessment suite",
     long_description=long_description,
     long_description_content_type="text/markdown",

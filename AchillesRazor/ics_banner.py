@@ -17,6 +17,8 @@ RESET = "\033[0m"
 WIDTH = 80
 INNER = WIDTH - 2  # inside the ║ ... ║ borders
 
+AUTHOR = "Allen Byrne (aka Cybershoresy)"
+
 # 5-row block font. Each glyph is a fixed width per character (4, except
 # 'I' and ' ' which are narrower) so words can be composed by simple
 # concatenation with a 1-column gap.
@@ -110,6 +112,7 @@ def get_banner(version="1.0.0", color=None):
     lines.append(blank)
     tagline = f"OT / ICS Passive Security Scanner{' ' * 4}v{version}"
     lines.append(_row(tagline, dim if color else None))
+    lines.append(_row(f"by {AUTHOR}", dim if color else None))
     lines.append(blank)
     lines.append(f"{blue}{bottom}{reset}" if color else bottom)
 

@@ -6,6 +6,8 @@
 
 [![Python Version](https://img.shields.io/badge/python-3.6+-blue.svg)](https://python.org)
 
+**Created by Allen Byrne (aka *Cybershoresy*)**
+
 ---
 
 ## 📋 Overview
@@ -81,3 +83,9 @@ achillesrazor -t 192.168.1.100 --type security -o report.json
 achillesrazor -t 192.168.1.0/24 --type exposure -o report.md
 achillesrazor --list-checks
 ```
+
+---
+
+## Author
+
+Created and maintained by **Allen Byrne** (aka **Cybershoresy**).

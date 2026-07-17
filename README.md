@@ -39,8 +39,45 @@ AchillesRazor is a modular, extensible framework for assessing the security post
 git clone https://github.com/ByrneIT/AchillesRazor.git
 cd AchillesRazor
 
-# Install dependencies
-pip install -r requirements.txt
+# Install (also pulls in requests + dnspython)
+pip install .
 
 # Run your first scan
-python -m AchillesRazor.ics_main -t 192.168.1.100
+achillesrazor -t 192.168.1.100
+```
+
+`pip install .` registers the `achillesrazor` command (and a short `AR` alias)
+on your PATH via setuptools `console_scripts` — no need to invoke it through
+`python -m`. If you'd rather not install the package, `pip install -r
+requirements.txt` followed by `python -m AchillesRazor.ics_main -t
+192.168.1.100` from the repo root works identically.
+
+A default run executes all 16 checks against the target and prints a console
+report. This can take a few minutes depending on how many ports the target
+has open or filtered — the scan prints a starting banner immediately, and
+per-check progress (`[3/16] Running: exposure... done`) as it goes.
+
+### Usage
+
+```
+achillesrazor -t <target> [options]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-t`, `--target` (or a bare positional target) | IP address, hostname, URL, or CIDR network (e.g. `192.168.1.0/24`) |
+| `--type <type>` | Run a single check instead of all 16 (see `--list-checks` for names) |
+| `-o`, `--output <path>` | Write the report to a file instead of stdout. `'-'` means stdout |
+| `--format {console,json,markdown,html}` | Force an output format; otherwise inferred from the `-o` file extension |
+| `--port <port>` | Check a specific port instead of the default OT port list (502, 102, 20000, 44818, 47808, 4840, 2404) |
+| `-v`, `--verbose` | Also print the full list of checks being run before they start |
+| `--list-checks` | List all available `--type` values and exit |
+
+Examples:
+
+```bash
+achillesrazor -t 192.168.1.100
+achillesrazor -t 192.168.1.100 --type security -o report.json
+achillesrazor -t 192.168.1.0/24 --type exposure -o report.md
+achillesrazor --list-checks
+```

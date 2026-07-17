@@ -392,22 +392,22 @@ class ICSReportGenerator:
 
     def save_console(self, filepath: str) -> None:
         """Save console report to file"""
-        with open(filepath, "w") as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(self.to_console())
 
     def save_json(self, filepath: str) -> None:
         """Save JSON report to file"""
-        with open(filepath, "w") as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(self.to_json())
 
     def save_markdown(self, filepath: str) -> None:
         """Save Markdown report to file"""
-        with open(filepath, "w") as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(self.to_markdown())
 
     def save_html(self, filepath: str) -> None:
         """Save HTML report to file"""
-        with open(filepath, "w") as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(self.to_html())
 
 

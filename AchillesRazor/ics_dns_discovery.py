@@ -3,6 +3,8 @@ import dns.reversename
 import socket
 import re
 
+from .ics_utils import safe_resolve
+
 def run_check(target_ip_or_domain, network_context=None):
     """
     OT/ICS DNS Discovery and Exposure Check
@@ -68,53 +70,41 @@ def check_domain_dns(domain):
     }
     
     # --- Check A records (IPv4) ---
-    try:
-        answers = dns.resolver.resolve(hostname, 'A')
+    answers = safe_resolve(hostname, 'A')
+    if answers:
         ips = [rdata.address for rdata in answers]
         results["details"].append(f"A Records: {', '.join(ips)}")
-    except:
-        pass
-    
+
     # --- Check AAAA records (IPv6) ---
-    try:
-        answers = dns.resolver.resolve(hostname, 'AAAA')
+    answers = safe_resolve(hostname, 'AAAA')
+    if answers:
         ips = [rdata.address for rdata in answers]
         results["details"].append(f"AAAA Records: {', '.join(ips)}")
-    except:
-        pass
-    
+
     # --- Check TXT records (often contain device info) ---
-    try:
-        answers = dns.resolver.resolve(hostname, 'TXT')
+    answers = safe_resolve(hostname, 'TXT')
+    if answers:
         txts = [rdata.strings[0].decode() for rdata in answers if rdata.strings]
         if txts:
             results["details"].append(f"TXT Records: {', '.join(txts[:2])}")  # Limit to first 2
-    except:
-        pass
-    
+
     # --- Check CNAME records (aliases, often reveal internal naming) ---
-    try:
-        answers = dns.resolver.resolve(hostname, 'CNAME')
+    answers = safe_resolve(hostname, 'CNAME')
+    if answers:
         cnames = [str(rdata.target) for rdata in answers]
         results["details"].append(f"CNAME: {', '.join(cnames)}")
-    except:
-        pass
-    
+
     # --- Check MX records (mail servers, often reveal internal network names) ---
-    try:
-        answers = dns.resolver.resolve(hostname, 'MX')
+    answers = safe_resolve(hostname, 'MX')
+    if answers:
         mx_records = [f"{rdata.exchange} (priority {rdata.preference})" for rdata in answers]
         results["details"].append(f"MX Records: {', '.join(mx_records[:2])}")
-    except:
-        pass
-    
+
     # --- Check NS records (name servers, reveal infrastructure) ---
-    try:
-        answers = dns.resolver.resolve(hostname, 'NS')
+    answers = safe_resolve(hostname, 'NS')
+    if answers:
         ns_records = [str(rdata.target) for rdata in answers]
         results["details"].append(f"NS Records: {', '.join(ns_records)}")
-    except:
-        pass
     
     if results["details"]:
         results["details"] = " | ".join(results["details"])
@@ -140,44 +130,31 @@ def check_ot_dns_discovery(domain):
     
     # --- Check for OPC-UA discovery via DNS SRV records ---
     # OPC-UA servers often register _opcua-tcp._tcp SRV records
-    try:
-        answers = dns.resolver.resolve(f"_opcua-tcp._tcp.{hostname}", 'SRV')
+    answers = safe_resolve(f"_opcua-tcp._tcp.{hostname}", 'SRV')
+    if answers:
         for rdata in answers:
             devices_found.append(f"OPC-UA Server: {rdata.target}:{rdata.port}")
             details.append(f"OPC-UA SRV Record: {rdata.target} (port {rdata.port})")
-    except:
-        pass
-    
+
     # --- Check for Siemens S7 discovery via DNS ---
     # Some Siemens systems register specific records
-    try:
-        # Try common Siemens naming patterns
-        for prefix in ["s7", "plc", "cpu", "siemens"]:
-            try:
-                answers = dns.resolver.resolve(f"{prefix}.{hostname}", 'A')
-                ips = [rdata.address for rdata in answers]
-                for ip in ips:
-                    devices_found.append(f"Siemens S7 Device: {prefix}.{hostname} ({ip})")
-                    details.append(f"Siemens S7 A Record: {prefix}.{hostname} -> {ip}")
-            except:
-                pass
-    except:
-        pass
-    
+    for prefix in ["s7", "plc", "cpu", "siemens"]:
+        answers = safe_resolve(f"{prefix}.{hostname}", 'A')
+        if answers:
+            ips = [rdata.address for rdata in answers]
+            for ip in ips:
+                devices_found.append(f"Siemens S7 Device: {prefix}.{hostname} ({ip})")
+                details.append(f"Siemens S7 A Record: {prefix}.{hostname} -> {ip}")
+
     # --- Check for Modbus TCP devices via DNS ---
-    try:
-        # Many Modbus devices register with specific naming conventions
-        for prefix in ["modbus", "mb", "rtu", "plc"]:
-            try:
-                answers = dns.resolver.resolve(f"{prefix}.{hostname}", 'A')
-                ips = [rdata.address for rdata in answers]
-                for ip in ips:
-                    devices_found.append(f"Modbus Device: {prefix}.{hostname} ({ip})")
-                    details.append(f"Modbus A Record: {prefix}.{hostname} -> {ip}")
-            except:
-                pass
-    except:
-        pass
+    # Many Modbus devices register with specific naming conventions
+    for prefix in ["modbus", "mb", "rtu", "plc"]:
+        answers = safe_resolve(f"{prefix}.{hostname}", 'A')
+        if answers:
+            ips = [rdata.address for rdata in answers]
+            for ip in ips:
+                devices_found.append(f"Modbus Device: {prefix}.{hostname} ({ip})")
+                details.append(f"Modbus A Record: {prefix}.{hostname} -> {ip}")
     
     # --- Check for common OT device naming conventions ---
     # This uses known naming patterns from OT environments
@@ -192,32 +169,28 @@ def check_ot_dns_discovery(domain):
     for pattern in ot_patterns:
         # Try pattern.xxx.local, pattern.xxx.plant, pattern.xxx.com
         for tld in [hostname, f"plant.{hostname}", f"local.{hostname}"]:
-            try:
-                answers = dns.resolver.resolve(f"{pattern}.{tld}", 'A')
+            answers = safe_resolve(f"{pattern}.{tld}", 'A')
+            if answers:
                 ips = [rdata.address for rdata in answers]
                 for ip in ips:
                     devices_found.append(f"OT Device: {pattern}.{tld} ({ip})")
                     details.append(f"OT A Record: {pattern}.{tld} -> {ip}")
-            except:
-                pass
-    
+
     # --- Check for DNS zone transfers (classic OT misconfiguration) ---
     # This attempts a zone transfer (AXFR) which is often misconfigured in OT networks
-    try:
-        ns_answers = dns.resolver.resolve(hostname, 'NS')
-        for ns in ns_answers:
-            ns_server = str(ns.target).rstrip('.')
-            try:
-                # Use dns.query to attempt zone transfer
-                import dns.query
-                zone = dns.zone.from_xfr(dns.query.xfr(ns_server, hostname))
-                if zone:
-                    devices_found.append(f"DNS Zone Transfer available on {ns_server}")
-                    details.append(f"Zone Transfer: {hostname} -> {ns_server} (exposes full network)")
-            except:
-                pass
-    except:
-        pass
+    ns_answers = safe_resolve(hostname, 'NS')
+    for ns in (ns_answers or []):
+        ns_server = str(ns.target).rstrip('.')
+        try:
+            # Use dns.query to attempt zone transfer (bounded per-message timeout;
+            # dns.query.xfr blocks with no timeout at all if one isn't passed)
+            import dns.query
+            zone = dns.zone.from_xfr(dns.query.xfr(ns_server, hostname, timeout=5))
+            if zone:
+                devices_found.append(f"DNS Zone Transfer available on {ns_server}")
+                details.append(f"Zone Transfer: {hostname} -> {ns_server} (exposes full network)")
+        except:
+            pass
     
     # --- Check for reverse DNS (reveals hostnames of devices) ---
     # This is done in the IP-based function below
@@ -237,7 +210,10 @@ def check_ip_dns(ip):
     try:
         # Convert IP to reverse DNS format
         rev_name = dns.reversename.from_address(ip)
-        answers = dns.resolver.resolve(rev_name, 'PTR')
+        resolver = dns.resolver.Resolver()
+        resolver.timeout = 2.0
+        resolver.lifetime = 3.0
+        answers = resolver.resolve(rev_name, 'PTR')
         ptr_records = [str(rdata.target) for rdata in answers]
         
         return {

@@ -7,10 +7,12 @@ Runs all OT/ICS security checks and generates reports
 import argparse
 import sys
 import os
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from typing import Dict, Any, List, Optional
 
 # Import all check functions
-from . import ALL_CHECKS
+from . import ALL_CHECKS, __version__
+from .ics_banner import print_banner
 from .ics_report_generator import ICSReportGenerator, create_report, save_report
 
 
@@ -19,6 +21,12 @@ from .ics_report_generator import ICSReportGenerator, create_report, save_report
 # -----------------------------------------------------------------
 
 DEFAULT_PORTS = [502, 102, 20000, 44818, 47808, 4840, 2404]
+
+# Hard ceiling on any single check, regardless of what timeouts it sets
+# internally. This is a safety net, not the primary defense - individual
+# checks should still time out their own sockets/DNS queries well before
+# this fires.
+CHECK_TIMEOUT_SECONDS = 60
 
 SCAN_TYPE_ALIASES = {
     "all": None,
@@ -83,37 +91,56 @@ def run_checks(
     else:
         check_names = [c for c in checks if c in ALL_CHECKS]
 
+    print(f"\n[+] Starting ICS scan against: {target}", flush=True)
+    print(f"[+] Running {len(check_names)} check(s) - this can take a few minutes...", flush=True)
     if verbose:
-        print(f"\n[+] Starting ICS scan against: {target}")
-        print(f"[+] Running {len(check_names)} checks: {', '.join(check_names)}\n")
+        print(f"    Checks: {', '.join(check_names)}\n", flush=True)
 
     # Check if target is a URL (for web checks) or IP (for OT checks)
     is_url = target.startswith(("http://", "https://"))
 
+    # Not used as a context manager: shutdown() on exit would block waiting
+    # for any still-running (timed-out) check thread to finish, and Python
+    # cannot forcibly kill a blocked thread. Letting the pool go untracked
+    # means a hung check's thread is simply abandoned once its timeout fires.
+    executor = ThreadPoolExecutor(max_workers=max(4, len(check_names) or 1))
+
     for i, check_name in enumerate(check_names, 1):
         check_func = ALL_CHECKS[check_name]
 
-        if verbose:
-            print(f"[{i}/{len(check_names)}] Running: {check_name}...", end=" ", flush=True)
+        # Always show per-check progress (not just under -v): a default scan
+        # with no responsive OT services can take a few minutes, and with no
+        # feedback at all that reads as a hang rather than normal operation.
+        print(f"[{i}/{len(check_names)}] Running: {check_name}...", end=" ", flush=True)
 
         try:
             # Determine how to call the check function
             if is_url:
                 # Web-style check (takes URL as first arg)
-                result = check_func(target)
+                future = executor.submit(check_func, target)
             else:
                 # OT-style check (takes IP and optional port)
                 if port:
-                    result = check_func(target, port)
+                    future = executor.submit(check_func, target, port)
                 else:
-                    result = check_func(target)
+                    future = executor.submit(check_func, target)
+
+            try:
+                result = future.result(timeout=CHECK_TIMEOUT_SECONDS)
+            except FutureTimeoutError:
+                result = {
+                    "name": check_name,
+                    "status": "error",
+                    "severity": "medium",
+                    "details": f"Check timed out after {CHECK_TIMEOUT_SECONDS}s and was skipped.",
+                    "recommendation": "The target may be unreachable or filtering traffic. Re-run with --type to isolate the slow check."
+                }
 
             results.append(result)
 
-            if verbose:
-                status = result.get("status", "unknown")
-                severity = result.get("severity", "low")
-                print(f"done ({status}/{severity})")
+            status = result.get("status", "unknown")
+            severity = result.get("severity", "low")
+            print(f"done ({status}/{severity})")
 
         except Exception as e:
             error_result = {
@@ -125,8 +152,7 @@ def run_checks(
             }
             results.append(error_result)
 
-            if verbose:
-                print(f"ERROR: {str(e)}")
+            print(f"ERROR: {str(e)}")
 
     return results
 
@@ -255,7 +281,7 @@ def parse_arguments():
         description="AchillesRazor - OT/ICS Security Assessment Suite",
         epilog="""
 Examples:
-  achillesrazor 192.168.1.100
+  achillesrazor -t 192.168.1.100
   achillesrazor 192.168.1.100 --type security -o report.json
   achillesrazor 192.168.1.0/24 --type exposure -o report.md
         """
@@ -265,6 +291,13 @@ Examples:
         "target",
         nargs="?",
         help="Target IP address, hostname, URL, or CIDR network"
+    )
+    parser.add_argument(
+        "-t",
+        "--target",
+        dest="target_flag",
+        metavar="TARGET",
+        help="Target IP address, hostname, URL, or CIDR network (same as the positional argument)"
     )
     parser.add_argument(
         "--type",
@@ -301,13 +334,26 @@ Examples:
     )
 
     args = parser.parse_args()
+    args.target = args.target_flag or args.target
     if not args.list_checks and not args.target:
-        parser.error("the following arguments are required: target")
+        parser.error("the following arguments are required: target (or -t/--target)")
     return args
 
 
 def main():
     """Main entry point"""
+    # Windows consoles frequently default to a legacy codepage (e.g. cp1252)
+    # that can't encode the report's status icons (checkmarks, arrows, etc.),
+    # which crashes print() with UnicodeEncodeError. Force UTF-8 on stdout so
+    # console output always works, falling back gracefully if stdout doesn't
+    # support reconfiguration (e.g. when piped through something unusual).
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
+    print_banner(version=__version__)
+
     args = parse_arguments()
 
     if args.list_checks:

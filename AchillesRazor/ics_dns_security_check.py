@@ -6,6 +6,8 @@ import ipaddress
 import socket
 from urllib.parse import urlparse
 
+from .ics_utils import safe_resolve
+
 def _get_domain(target_url):
     parsed = urlparse(target_url)
     host = parsed.netloc or parsed.path
@@ -169,17 +171,10 @@ def run_check(target_url):
 
 def check_dnssec(domain):
     """Check if DNSSEC is enabled for a domain"""
-    try:
-        # Query for DNSKEY records - indicates DNSSEC signing
-        answers = dns.resolver.resolve(domain, 'DNSKEY')
-        if answers:
-            return {"status": "enabled", "keys": len(answers)}
-    except dns.resolver.NoAnswer:
-        pass
-    except dns.resolver.NXDOMAIN:
-        pass
-    except Exception:
-        pass
+    # Query for DNSKEY records - indicates DNSSEC signing
+    answers = safe_resolve(domain, 'DNSKEY')
+    if answers:
+        return {"status": "enabled", "keys": len(answers)}
 
     # Check if domain has a DS record in parent zone
     try:
@@ -195,73 +190,65 @@ def check_dnssec(domain):
 def check_dns_over_tls(domain):
     """Check if DNS over TLS is supported (simplified)"""
     # This is a simplified check - real DoT discovery requires querying port 853
-    try:
-        # Check if DNS server responds on port 853 (DoT)
-        # Get the DNS server from the domain
-        ns_answers = dns.resolver.resolve(domain, 'NS')
-        for ns in ns_answers:
-            ns_server = str(ns.target).rstrip('.')
-            try:
-                # Try to resolve the NS server to an IP
-                ip_answers = dns.resolver.resolve(ns_server, 'A')
-                for ip in ip_answers:
-                    # Try to connect to port 853 (DoT)
-                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    s.settimeout(2)
-                    result = s.connect_ex((ip.address, 853))
-                    s.close()
-                    if result == 0:
-                        return f"available on {ns_server}"
-            except:
-                pass
-        return None
-    except:
-        return None
+    # Check if DNS server responds on port 853 (DoT)
+    # Get the DNS server from the domain
+    ns_answers = safe_resolve(domain, 'NS')
+    for ns in (ns_answers or []):
+        ns_server = str(ns.target).rstrip('.')
+        try:
+            # Try to resolve the NS server to an IP
+            ip_answers = safe_resolve(ns_server, 'A')
+            for ip in (ip_answers or []):
+                # Try to connect to port 853 (DoT)
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(2)
+                result = s.connect_ex((ip.address, 853))
+                s.close()
+                if result == 0:
+                    return f"available on {ns_server}"
+        except:
+            pass
+    return None
 
 
 def check_zone_transfer_security(domain):
     """Check if DNS zone transfer (AXFR) is allowed (critical OT security issue)"""
-    try:
-        # Get NS records for the domain
-        ns_answers = dns.resolver.resolve(domain, 'NS')
-        for ns in ns_answers:
-            ns_server = str(ns.target).rstrip('.')
-            try:
-                # Try to perform a zone transfer
-                zone = dns.zone.from_xfr(dns.query.xfr(ns_server, domain, timeout=5))
-                if zone:
-                    return {"vulnerable": True, "server": ns_server}
-            except dns.query.TransferError:
-                # Transfer refused - good
-                pass
-            except Exception:
-                pass
-        return {"vulnerable": False, "server": None}
-    except:
-        return {"vulnerable": False, "server": None}
+    # Get NS records for the domain
+    ns_answers = safe_resolve(domain, 'NS')
+    for ns in (ns_answers or []):
+        ns_server = str(ns.target).rstrip('.')
+        try:
+            # Try to perform a zone transfer
+            zone = dns.zone.from_xfr(dns.query.xfr(ns_server, domain, timeout=5))
+            if zone:
+                return {"vulnerable": True, "server": ns_server}
+        except dns.query.TransferError:
+            # Transfer refused - good
+            pass
+        except Exception:
+            pass
+    return {"vulnerable": False, "server": None}
 
 
 def check_recursive_resolver(domain):
     """Check if DNS recursive resolver is open (can be used in amplification attacks)"""
-    try:
-        # Get NS records
-        ns_answers = dns.resolver.resolve(domain, 'NS')
-        for ns in ns_answers:
-            ns_server = str(ns.target).rstrip('.')
-            try:
-                # Try to resolve a known domain using recursion
-                resolver = dns.resolver.Resolver()
-                resolver.nameservers = [ns_server]
-                resolver.timeout = 2
-                # If this succeeds, recursion is likely allowed
-                test_answers = resolver.resolve('google.com', 'A')
-                if test_answers:
-                    return {"open": True, "server": ns_server}
-            except:
-                pass
-        return {"open": False, "server": None}
-    except:
-        return {"open": False, "server": None}
+    # Get NS records
+    ns_answers = safe_resolve(domain, 'NS')
+    for ns in (ns_answers or []):
+        ns_server = str(ns.target).rstrip('.')
+        try:
+            # Try to resolve a known domain using recursion
+            resolver = dns.resolver.Resolver()
+            resolver.nameservers = [ns_server]
+            resolver.timeout = 2
+            resolver.lifetime = 3
+            # If this succeeds, recursion is likely allowed
+            test_answers = resolver.resolve('google.com', 'A')
+            if test_answers:
+                return {"open": True, "server": ns_server}
+        except:
+            pass
+    return {"open": False, "server": None}
 
 
 def check_ot_device_txt_records(domain):
@@ -270,30 +257,27 @@ def check_ot_device_txt_records(domain):
     Many OT systems store device info in TXT records
     """
     devices = []
-    try:
-        # Try to find TXT records that contain OT metadata
-        answers = dns.resolver.resolve(domain, 'TXT')
-        for rdata in answers:
-            txt_data = rdata.to_text().strip('"')
-            # Look for OT-specific patterns
-            ot_patterns = [
-                "plc", "rtu", "hmi", "scada", "dcs", "modbus", "s7", "profibus",
-                "pump", "valve", "sensor", "motor", "drive", "inverter",
-                "controller", "firmware", "serial", "mac", "model"
-            ]
-            for pattern in ot_patterns:
-                if pattern in txt_data.lower():
-                    # Extract device info
-                    device_info = f"{pattern.upper()} device: {txt_data[:50]}"
-                    if device_info not in devices:
-                        devices.append(device_info)
-                    break
+    # Try to find TXT records that contain OT metadata
+    answers = safe_resolve(domain, 'TXT')
+    for rdata in (answers or []):
+        txt_data = rdata.to_text().strip('"')
+        # Look for OT-specific patterns
+        ot_patterns = [
+            "plc", "rtu", "hmi", "scada", "dcs", "modbus", "s7", "profibus",
+            "pump", "valve", "sensor", "motor", "drive", "inverter",
+            "controller", "firmware", "serial", "mac", "model"
+        ]
+        for pattern in ot_patterns:
+            if pattern in txt_data.lower():
+                # Extract device info
+                device_info = f"{pattern.upper()} device: {txt_data[:50]}"
+                if device_info not in devices:
+                    devices.append(device_info)
+                break
 
-            # Check for JSON-like device metadata
-            if '{' in txt_data and '}' in txt_data:
-                devices.append(f"Potential device metadata (JSON): {txt_data[:50]}")
-    except:
-        pass
+        # Check for JSON-like device metadata
+        if '{' in txt_data and '}' in txt_data:
+            devices.append(f"Potential device metadata (JSON): {txt_data[:50]}")
 
     return devices
 
@@ -302,57 +286,48 @@ def check_cache_poisoning_vulnerability(domain):
     """Check if DNS resolver uses strong source port randomization"""
     # This is a heuristic check - real detection requires advanced testing
     # We'll check if the DNS server uses random source ports
-    try:
-        # Check DNS server response
-        import random
-        import time
+    ns_answers = safe_resolve(domain, 'NS')
+    for ns in (ns_answers or []):
+        ns_server = str(ns.target).rstrip('.')
+        try:
+            # Test if source port changes between queries
+            resolver = dns.resolver.Resolver()
+            resolver.nameservers = [ns_server]
+            resolver.timeout = 2
+            resolver.lifetime = 3
 
-        ns_answers = dns.resolver.resolve(domain, 'NS')
-        for ns in ns_answers:
-            ns_server = str(ns.target).rstrip('.')
-            try:
-                # Test if source port changes between queries
-                resolver = dns.resolver.Resolver()
-                resolver.nameservers = [ns_server]
-                resolver.timeout = 2
-
-                ports = []
-                for i in range(3):
-                    # Trigger a query
-                    resolver.resolve('google.com', 'A')
-                    # We can't directly get the source port from dns.resolver
-                    # This is a simplified check
-                    ports.append(i)  # Placeholder
-
-                # If all ports are the same, potential vulnerability
+            ports = []
+            for i in range(3):
+                # Trigger a query
+                resolver.resolve('google.com', 'A')
+                # We can't directly get the source port from dns.resolver
                 # This is a simplified check
-                return {"vulnerable": False}  # Default to safe
-            except:
-                pass
-    except:
-        pass
+                ports.append(i)  # Placeholder
+
+            # If all ports are the same, potential vulnerability
+            # This is a simplified check
+            return {"vulnerable": False}  # Default to safe
+        except:
+            pass
 
     return {"vulnerable": False}
 
 
 def check_dnssec_algorithm_strength(domain):
     """Check if DNSSEC uses strong cryptographic algorithms"""
-    try:
-        answers = dns.resolver.resolve(domain, 'DNSKEY')
-        for rdata in answers:
-            # Check algorithm numbers
-            # 13 (ECDSAP256SHA256) is strong
-            # 5 (RSASHA1) is weak
-            # 8 (RSASHA256) is good
-            alg = rdata.algorithm
-            if alg in [5, 7, 3]:  # Weak algorithms
-                return {"weak": True, "algorithm": rdata.algorithm_name}
-            elif alg in [13, 14, 15]:  # Strong algorithms
-                return {"status": "strong", "algorithm": rdata.algorithm_name}
-            else:
-                return {"status": "unknown", "algorithm": rdata.algorithm_name}
-    except:
-        pass
+    answers = safe_resolve(domain, 'DNSKEY')
+    for rdata in (answers or []):
+        # Check algorithm numbers
+        # 13 (ECDSAP256SHA256) is strong
+        # 5 (RSASHA1) is weak
+        # 8 (RSASHA256) is good
+        alg = rdata.algorithm
+        if alg in [5, 7, 3]:  # Weak algorithms
+            return {"weak": True, "algorithm": rdata.algorithm_name}
+        elif alg in [13, 14, 15]:  # Strong algorithms
+            return {"status": "strong", "algorithm": rdata.algorithm_name}
+        else:
+            return {"status": "unknown", "algorithm": rdata.algorithm_name}
 
     return {"status": "unknown", "algorithm": "unknown"}
 
@@ -361,24 +336,22 @@ def check_dns_rate_limiting(domain):
     """Check if DNS RRL is enabled"""
     # RRL is typically enabled on authoritative servers
     # We'll check if the server responds with truncated responses for large queries
-    try:
-        ns_answers = dns.resolver.resolve(domain, 'NS')
-        for ns in ns_answers:
-            ns_server = str(ns.target).rstrip('.')
-            try:
-                # Try to send a large query that would trigger RRL if enabled
-                resolver = dns.resolver.Resolver()
-                resolver.nameservers = [ns_server]
-                resolver.timeout = 2
+    ns_answers = safe_resolve(domain, 'NS')
+    for ns in (ns_answers or []):
+        ns_server = str(ns.target).rstrip('.')
+        try:
+            # Try to send a large query that would trigger RRL if enabled
+            resolver = dns.resolver.Resolver()
+            resolver.nameservers = [ns_server]
+            resolver.timeout = 2
+            resolver.lifetime = 3
 
-                # Query for ANY record (typically returns large response)
-                # If RRL is enabled, this might be rate-limited
-                resolver.resolve(domain, 'ANY')
-                return {"enabled": True}
-            except:
-                pass
-    except:
-        pass
+            # Query for ANY record (typically returns large response)
+            # If RRL is enabled, this might be rate-limited
+            resolver.resolve(domain, 'ANY')
+            return {"enabled": True}
+        except:
+            pass
 
     return {"enabled": False}
 
@@ -387,16 +360,12 @@ def check_dns_logging(domain):
     """Check if DNS query logging is enabled"""
     # This is a heuristic check - DNS logging is not directly queryable
     # We'll check if SOA refresh interval is reasonable (indicates monitoring)
-    try:
-        soa_answers = dns.resolver.resolve(domain, 'SOA')
-        for rdata in soa_answers:
-            # Refresh interval: if less than 24 hours, likely monitored
-            refresh = rdata.refresh
-            if refresh < 86400:  # 24 hours in seconds
-                return {"enabled": True}
-        return {"enabled": False}
-    except:
-        pass
+    soa_answers = safe_resolve(domain, 'SOA')
+    for rdata in (soa_answers or []):
+        # Refresh interval: if less than 24 hours, likely monitored
+        refresh = rdata.refresh
+        if refresh < 86400:  # 24 hours in seconds
+            return {"enabled": True}
 
     return {"enabled": False}
 
@@ -417,39 +386,36 @@ def check_ot_device_naming(domain):
         "reactor", "separator", "filter", "dryer", "packer"
     ]
 
-    # Try to resolve common OT hostnames
+    # Try to resolve common OT hostnames. Every candidate below is a separate
+    # DNS query (300+ for the full pattern list), so each one goes through
+    # safe_resolve() to keep a hard per-query timeout instead of relying on
+    # library/system defaults that can stall badly against an unreachable or
+    # filtering nameserver.
     for pattern in ot_patterns:
-        try:
-            # Try to resolve pattern.domain
-            hostname = f"{pattern}.{domain}"
-            answers = dns.resolver.resolve(hostname, 'A')
+        # Try to resolve pattern.domain
+        hostname = f"{pattern}.{domain}"
+        answers = safe_resolve(hostname, 'A')
+        if answers:
             ips = [rdata.address for rdata in answers]
             for ip in ips:
                 devices.append(f"{pattern.upper()} device at {hostname} ({ip})")
-        except:
-            pass
 
         # Try with different naming conventions
-        for prefix in ["", "north", "south", "east", "west", "primary", "backup"]:
-            if prefix:
-                try:
-                    hostname = f"{pattern}-{prefix}.{domain}"
-                    answers = dns.resolver.resolve(hostname, 'A')
-                    ips = [rdata.address for rdata in answers]
-                    for ip in ips:
-                        devices.append(f"{pattern.upper()}-{prefix} device at {hostname} ({ip})")
-                except:
-                    pass
+        for prefix in ["north", "south", "east", "west", "primary", "backup"]:
+            hostname = f"{pattern}-{prefix}.{domain}"
+            answers = safe_resolve(hostname, 'A')
+            if answers:
+                ips = [rdata.address for rdata in answers]
+                for ip in ips:
+                    devices.append(f"{pattern.upper()}-{prefix} device at {hostname} ({ip})")
 
         # Try with numeric suffix (common for PLCs)
         for num in range(1, 6):
-            try:
-                hostname = f"{pattern}{num}.{domain}"
-                answers = dns.resolver.resolve(hostname, 'A')
+            hostname = f"{pattern}{num}.{domain}"
+            answers = safe_resolve(hostname, 'A')
+            if answers:
                 ips = [rdata.address for rdata in answers]
                 for ip in ips:
                     devices.append(f"{pattern.upper()}{num} device at {hostname} ({ip})")
-            except:
-                pass
 
     return devices

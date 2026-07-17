@@ -75,14 +75,17 @@ def check_modbus_exposure(ip):
     Check for Modbus exposure
     Equivalent to checking /.git/, /.env, /admin/ in the web version
     """
-    exposures = []
-    
-    # --- Check 1: Basic Modbus availability (like checking /admin/) ---
-    if has_modbus_basic_availability(ip):
-        exposures.append("Modbus device present (port 502 exposed)")
-    else:
+    # A device merely being present on its port is not itself an exposure -
+    # every properly configured PLC has its port open by design. Only the
+    # checks below (unauthenticated read/write, exposed identity, default
+    # settings) represent an actual finding, so "present" is used purely as
+    # a gate and is never added to `exposures`, which is what drives
+    # severity in run_check().
+    if not has_modbus_basic_availability(ip):
         return None  # No exposure to report
-    
+
+    exposures = []
+
     # --- Check 2: Read access (like checking /.git/) ---
     if has_modbus_read_access(ip):
         exposures.append("Read access allowed without authentication")
@@ -105,22 +108,18 @@ def check_modbus_exposure(ip):
     
     if exposures:
         return "Modbus: " + ", ".join(exposures)
-    else:
-        return "Modbus device present but no additional exposure detected"
+    return None  # Device present, but nothing exposed - not a finding here
 
 
 def check_s7_exposure(ip):
     """
     Check for Siemens S7 exposure
     """
-    exposures = []
-    
-    # --- Check 1: Basic S7 availability ---
-    if has_s7_basic_availability(ip):
-        exposures.append("S7 PLC present (port 102 exposed)")
-    else:
+    if not has_s7_basic_availability(ip):
         return None
-    
+
+    exposures = []
+
     # --- Check 2: CPU info exposure (like checking /phpinfo.php) ---
     if has_s7_cpu_info_exposed(ip):
         exposures.append("CPU information exposed")
@@ -143,22 +142,18 @@ def check_s7_exposure(ip):
     
     if exposures:
         return "S7: " + ", ".join(exposures)
-    else:
-        return "S7 PLC present but no additional exposure detected"
+    return None
 
 
 def check_dnp3_exposure(ip):
     """
     Check for DNP3 exposure
     """
-    exposures = []
-    
-    # --- Check 1: Basic DNP3 availability ---
-    if has_dnp3_basic_availability(ip):
-        exposures.append("DNP3 device present (port 20000 exposed)")
-    else:
+    if not has_dnp3_basic_availability(ip):
         return None
-    
+
+    exposures = []
+
     # --- Check 2: Device info exposed (like checking /phpinfo.php) ---
     if has_dnp3_device_info_exposed(ip):
         exposures.append("Device information exposed")
@@ -177,22 +172,18 @@ def check_dnp3_exposure(ip):
     
     if exposures:
         return "DNP3: " + ", ".join(exposures)
-    else:
-        return "DNP3 device present but no additional exposure detected"
+    return None
 
 
 def check_cip_exposure(ip):
     """
     Check for EtherNet/IP (CIP) exposure
     """
-    exposures = []
-    
-    # --- Check 1: Basic CIP availability ---
-    if has_cip_basic_availability(ip):
-        exposures.append("CIP/EtherNet/IP device present (port 44818 exposed)")
-    else:
+    if not has_cip_basic_availability(ip):
         return None
-    
+
+    exposures = []
+
     # --- Check 2: Device identity exposed (like checking /phpinfo.php) ---
     if has_cip_identity_exposed(ip):
         exposures.append("Device identity information exposed")
@@ -211,22 +202,18 @@ def check_cip_exposure(ip):
     
     if exposures:
         return "CIP: " + ", ".join(exposures)
-    else:
-        return "CIP device present but no additional exposure detected"
+    return None
 
 
 def check_bacnet_exposure(ip):
     """
     Check for BACnet exposure
     """
-    exposures = []
-    
-    # --- Check 1: Basic BACnet availability ---
-    if has_bacnet_basic_availability(ip):
-        exposures.append("BACnet device present (port 47808 exposed)")
-    else:
+    if not has_bacnet_basic_availability(ip):
         return None
-    
+
+    exposures = []
+
     # --- Check 2: Who-Is response (like checking /server-status) ---
     if has_bacnet_whois_response(ip):
         exposures.append("Responds to Who-Is broadcasts")
@@ -241,22 +228,18 @@ def check_bacnet_exposure(ip):
     
     if exposures:
         return "BACnet: " + ", ".join(exposures)
-    else:
-        return "BACnet device present but no additional exposure detected"
+    return None
 
 
 def check_opcua_exposure(ip):
     """
     Check for OPC-UA exposure
     """
-    exposures = []
-    
-    # --- Check 1: Basic OPC-UA availability ---
-    if has_opcua_basic_availability(ip):
-        exposures.append("OPC-UA server present (port 4840 exposed)")
-    else:
+    if not has_opcua_basic_availability(ip):
         return None
-    
+
+    exposures = []
+
     # --- Check 2: Anonymous access (like checking /.git/) ---
     if has_opcua_anonymous_access(ip):
         exposures.append("Anonymous access allowed")
@@ -271,22 +254,18 @@ def check_opcua_exposure(ip):
     
     if exposures:
         return "OPC-UA: " + ", ".join(exposures)
-    else:
-        return "OPC-UA server present but no additional exposure detected"
+    return None
 
 
 def check_iec104_exposure(ip):
     """
     Check for IEC 60870-5-104 exposure
     """
-    exposures = []
-    
-    # --- Check 1: Basic IEC-104 availability ---
-    if has_iec104_basic_availability(ip):
-        exposures.append("IEC-104 device present (port 2404 exposed)")
-    else:
+    if not has_iec104_basic_availability(ip):
         return None
-    
+
+    exposures = []
+
     # --- Check 2: StartDT response (like checking /server-status) ---
     if has_iec104_startdt_response(ip):
         exposures.append("Responds to StartDT activation requests")
@@ -305,8 +284,7 @@ def check_iec104_exposure(ip):
     
     if exposures:
         return "IEC-104: " + ", ".join(exposures)
-    else:
-        return "IEC-104 device present but no additional exposure detected"
+    return None
 
 
 # -----------------------------------------------------------------

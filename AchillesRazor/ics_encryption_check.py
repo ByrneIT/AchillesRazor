@@ -451,12 +451,24 @@ def check_iec104_encryption(ip):
 # -----------------------------------------------------------------
 
 def test_port(ip, port, timeout=2, udp=False):
-    """Test if a port is open"""
+    """Test if a port is open.
+
+    UDP is connectionless, so sendto() alone never confirms anything is
+    listening - a datagram to a closed port on a reachable host still
+    "succeeds" from the caller's perspective. This must wait for an actual
+    reply (or a timeout) before reporting the port open, otherwise every
+    scan reports BACnet as present regardless of the target.
+    """
     try:
         if udp:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.settimeout(timeout)
             sock.sendto(b"\x00", (ip, port))
+            try:
+                sock.recvfrom(1024)
+            except socket.timeout:
+                sock.close()
+                return False
             sock.close()
             return True
         else:

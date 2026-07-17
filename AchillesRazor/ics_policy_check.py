@@ -62,9 +62,19 @@ def run_check(target_ip, target_port=None):
             "recommendation": "No action needed."
         }
 
+    # Always report what was actually found for auth/access on every
+    # device, independent of severity - a device with authentication
+    # correctly configured should be visible in the report too, not just
+    # the ones with problems. Severity itself still comes only from
+    # `issues` below.
+    device_summary = " | ".join(
+        f"{result['protocol']}: Auth={result.get('auth_type', 'Unknown')}"
+        for result in devices_found
+    )
+
     # Build the details string (like your CSP details)
     if issues:
-        details = "OT/ICS devices found but with security policy weaknesses: " + " ".join(issues)
+        details = device_summary + " | Security policy weaknesses: " + " ".join(issues)
         return {
             "name": name,
             "status": "warn",
@@ -82,7 +92,7 @@ def run_check(target_ip, target_port=None):
         "name": name,
         "status": "pass",
         "severity": "low",
-        "details": f"Found {len(devices_found)} OT/ICS device(s) with no obvious security policy weaknesses detected.",
+        "details": device_summary + f" | {len(devices_found)} OT/ICS device(s) found with no obvious security policy weaknesses.",
         "recommendation": "Continue to review security policies as firmware is updated and network changes occur."
     }
 
@@ -126,13 +136,16 @@ def check_modbus_policy(ip):
         "policy_found": False
     }
 
-    # Check if authentication is present (like checking for CSP header)
-    if has_modbus_auth(ip):
-        result["policy_found"] = True
-        result["auth_type"] = "Present"
-    else:
-        result["issues"].append("No authentication policy (Modbus has no native auth - relies on network segmentation)")
-        result["recommendation"] = "Implement network segmentation and firewalls to restrict Modbus access."
+    # Modbus has no native authentication mechanism at all - that's a fixed
+    # protocol characteristic true of every Modbus device in existence, not
+    # a per-device finding. Surface it as context in the recommendation
+    # rather than as an "issue", otherwise has_modbus_auth() (which always
+    # returns False by design - see its docstring) would put every single
+    # Modbus device this check ever sees into the `issues` branch, which
+    # run_check() maps straight to "high" severity regardless of whether
+    # the device actually has any real weakness.
+    result["auth_type"] = "None (protocol has no native authentication - relies on network segmentation)"
+    result["recommendation"] = "Implement network segmentation and firewalls to restrict Modbus access."
 
     # Check for default Unit ID (like checking for 'unsafe-inline')
     if has_modbus_default_unit(ip):
@@ -144,12 +157,16 @@ def check_modbus_policy(ip):
         result["issues"].append("Write access available without authentication - like enabling 'unsafe-eval'")
         result["recommendation"] += " Restrict write access to trusted clients only."
 
-    # Check if device is identifiable (like checking if CSP is present)
+    # Check if device is identifiable. Responding to identification probes
+    # is the actual information-disclosure weakness; staying quiet is the
+    # secure outcome and must not be flagged as an issue (the previous
+    # logic had this inverted, penalizing devices for being restrictive).
     if has_modbus_identification(ip):
         result["device_identifiable"] = True
+        result["issues"].append("Device responds to identification requests - like exposing CSP report-uri details")
+        result["recommendation"] += " Restrict or disable device identification queries where possible."
     else:
-        result["issues"].append("Device does not respond to identification requests - policy may be restrictive")
-        result["recommendation"] += " Verify device is properly configured."
+        result["device_identifiable"] = False
 
     return result
 
@@ -174,6 +191,7 @@ def check_s7_policy(ip):
         result["policy_found"] = True
         result["auth_type"] = "Access Protection Enabled"
     else:
+        result["auth_type"] = "No Access Protection"
         result["issues"].append("No PLC access protection - like missing CSP header")
         result["recommendation"] = "Enable S7 access protection (password) in TIA Portal."
 
@@ -210,6 +228,7 @@ def check_dnp3_policy(ip):
         result["policy_found"] = True
         result["auth_type"] = "Authentication Enabled"
     else:
+        result["auth_type"] = "Authentication Not Detected"
         result["issues"].append("DNP3 authentication not enabled - like missing CSP header")
         result["recommendation"] = "Enable DNP3 authentication (Secure Authentication v5)."
 
@@ -233,7 +252,11 @@ def check_cip_policy(ip):
         "port": 44818,
         "issues": [],
         "recommendation": "",
-        "policy_found": False
+        "policy_found": False,
+        # CIP has no native authentication mechanism - this is a fixed
+        # protocol characteristic, reported for visibility but not treated
+        # as a per-device "issue" (see check_modbus_policy for why).
+        "auth_type": "None (protocol has no native authentication - relies on network segmentation)",
     }
 
     # CIP has limited security - check for common policy issues
@@ -261,7 +284,8 @@ def check_bacnet_policy(ip):
         "port": 47808,
         "issues": [],
         "recommendation": "",
-        "policy_found": False
+        "policy_found": False,
+        "auth_type": "None (protocol has no native security - relies on network segmentation)",
     }
 
     # BACnet has no native security - policy is purely network segmentation
@@ -297,6 +321,7 @@ def check_opcua_policy(ip):
         result["policy_found"] = True
         result["auth_type"] = "Security Enabled"
     else:
+        result["auth_type"] = "Security Not Enforced"
         result["issues"].append("OPC-UA security not enabled - like missing CSP header")
         result["recommendation"] = "Enable OPC-UA security (authentication, encryption, and signing)."
 
@@ -312,12 +337,16 @@ def check_iec104_policy(ip):
     """
     Check IEC 60870-5-104 security policy
     """
+    if not _port_open(ip, 2404):
+        return None
+
     result = {
         "protocol": "IEC-104",
         "port": 2404,
         "issues": [],
         "recommendation": "",
-        "policy_found": False
+        "policy_found": False,
+        "auth_type": "None (protocol has no native authentication)",
     }
 
     # IEC-104 has minimal security

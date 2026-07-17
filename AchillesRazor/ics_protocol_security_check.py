@@ -296,6 +296,15 @@ def check_bacnet_security_fields(ip):
     """
     Check BACnet protocol security fields
     """
+    # UDP is connectionless - creating the socket below never fails on its
+    # own, so this must actually confirm a BACnet device is listening
+    # before reporting anything. Without this gate, every scan reported
+    # BACnet as present with missing auth/encryption regardless of the
+    # target, because nothing here ever sent a probe or checked for a
+    # reply.
+    if not has_bacnet_response(ip):
+        return None
+
     result = {
         "protocol": "BACnet",
         "port": 47808,
@@ -303,30 +312,20 @@ def check_bacnet_security_fields(ip):
         "weak_fields": []
     }
 
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.settimeout(3)
+    # --- Check 1: Is authentication enabled? (like HSTS) ---
+    # BACnet has no native authentication
+    result["missing_fields"].append("Authentication (BACnet has no native auth)")
 
-        # --- Check 1: Is authentication enabled? (like HSTS) ---
-        # BACnet has no native authentication
-        result["missing_fields"].append("Authentication (BACnet has no native auth)")
+    # --- Check 2: Is encryption used? (like CSP) ---
+    # BACnet has no native encryption
+    result["missing_fields"].append("Encryption (BACnet is plaintext)")
 
-        # --- Check 2: Is encryption used? (like CSP) ---
-        # BACnet has no native encryption
-        result["missing_fields"].append("Encryption (BACnet is plaintext)")
+    # --- Check 3: Is device info protected? (like X-Frame-Options) ---
+    result["weak_fields"].append("Device information exposed (Who-Is responses)")
 
-        # --- Check 3: Is device info protected? (like X-Frame-Options) ---
-        if has_bacnet_response(ip):
-            result["weak_fields"].append("Device information exposed (Who-Is responses)")
-
-        # --- Check 4: Is device object protected? (like X-Content-Type-Options) ---
-        if has_bacnet_device_object_exposed(ip):
-            result["weak_fields"].append("Device object configuration exposed")
-
-        s.close()
-
-    except:
-        return None
+    # --- Check 4: Is device object protected? (like X-Content-Type-Options) ---
+    if has_bacnet_device_object_exposed(ip):
+        result["weak_fields"].append("Device object configuration exposed")
 
     return result
 
@@ -420,25 +419,36 @@ def check_iec104_security_fields(ip):
 
 # These functions are reused from the other mutated files
 # For brevity, I'm referencing them here - they are already defined
+#
+# Cross-module imports must fall back to the non-package form: when this
+# file is imported as AchillesRazor.ics_protocol_security_check the
+# package-relative form is required, but a bare `from ics_exposure_check
+# import X` (no AchillesRazor. prefix) raises ModuleNotFoundError in that
+# context. Every one of these used to be a bare import, which meant the
+# first has_* call in each check_*_security_fields() raised, was caught by
+# that function's blanket `except: return None`, and silently made this
+# entire check report "no devices detected" no matter what was actually
+# on the wire.
+
+def _import_from(module_name, attr_name):
+    try:
+        module = __import__(f"AchillesRazor.{module_name}", fromlist=[attr_name])
+    except ImportError:
+        module = __import__(module_name, fromlist=[attr_name])
+    return getattr(module, attr_name)
+
 
 def has_modbus_default_unit_id(ip):
-    from ics_exposure_check import has_modbus_default_unit_id
-    return has_modbus_default_unit_id(ip)
+    return _import_from("ics_exposure_check", "has_modbus_default_unit_id")(ip)
 
 def has_modbus_write_access(ip):
-    try:
-        from AchillesRazor.ics_exposure_check import has_modbus_write_access
-    except ImportError:
-        from ics_exposure_check import has_modbus_write_access
-    return has_modbus_write_access(ip)
+    return _import_from("ics_exposure_check", "has_modbus_write_access")(ip)
 
 def has_modbus_device_id_exposed(ip):
-    from ics_exposure_check import has_modbus_device_id_exposed
-    return has_modbus_device_id_exposed(ip)
+    return _import_from("ics_exposure_check", "has_modbus_device_id_exposed")(ip)
 
 def has_s7_access_protection(ip):
-    from ics_policy_check import has_s7_access_protection
-    return has_s7_access_protection(ip)
+    return _import_from("ics_policy_check", "has_s7_access_protection")(ip)
 
 def has_s7_encryption(ip):
     # Simplified: check if S7 uses TLS on port 102 (TLS is rare)
@@ -453,78 +463,61 @@ def has_s7_encryption(ip):
         return True
 
 def has_s7_cpu_info_exposed(ip):
-    from ics_exposure_check import has_s7_cpu_info_exposed
-    return has_s7_cpu_info_exposed(ip)
+    return _import_from("ics_exposure_check", "has_s7_cpu_info_exposed")(ip)
 
 def has_s7_write_access(ip):
-    from ics_exposure_check import has_s7_write_access
-    return has_s7_write_access(ip)
+    return _import_from("ics_exposure_check", "has_s7_write_access")(ip)
 
 def has_s7_module_info_exposed(ip):
-    from ics_exposure_check import has_s7_module_info_exposed
-    return has_s7_module_info_exposed(ip)
+    return _import_from("ics_exposure_check", "has_s7_module_info_exposed")(ip)
 
 def has_dnp3_auth(ip):
-    from ics_policy_check import has_dnp3_auth
-    return has_dnp3_auth(ip)
+    return _import_from("ics_policy_check", "has_dnp3_auth")(ip)
 
 def has_dnp3_device_info_exposed(ip):
-    from ics_exposure_check import has_dnp3_device_info_exposed
-    return has_dnp3_device_info_exposed(ip)
+    return _import_from("ics_exposure_check", "has_dnp3_device_info_exposed")(ip)
 
 def has_dnp3_write_access(ip):
-    from ics_exposure_check import has_dnp3_write_access
-    return has_dnp3_write_access(ip)
+    return _import_from("ics_exposure_check", "has_dnp3_write_access")(ip)
 
 def has_dnp3_default_addresses(ip):
-    from ics_exposure_check import has_dnp3_default_addresses
-    return has_dnp3_default_addresses(ip)
+    return _import_from("ics_exposure_check", "has_dnp3_default_addresses")(ip)
 
 def has_cip_identity_exposed(ip):
-    from ics_exposure_check import has_cip_identity_exposed
-    return has_cip_identity_exposed(ip)
+    return _import_from("ics_exposure_check", "has_cip_identity_exposed")(ip)
 
 def has_cip_write_access(ip):
-    from ics_exposure_check import has_cip_write_access
-    return has_cip_write_access(ip)
+    return _import_from("ics_exposure_check", "has_cip_write_access")(ip)
 
 def has_cip_defaults(ip):
-    from ics_exposure_check import has_cip_defaults
-    return has_cip_defaults(ip)
+    return _import_from("ics_exposure_check", "has_cip_defaults")(ip)
 
 def has_bacnet_response(ip):
-    from ics_exposure_check import has_bacnet_response
-    return has_bacnet_response(ip)
+    return _import_from("ics_policy_check", "has_bacnet_response")(ip)
 
 def has_bacnet_device_object_exposed(ip):
-    from ics_exposure_check import has_bacnet_device_object_exposed
-    return has_bacnet_device_object_exposed(ip)
+    return _import_from("ics_exposure_check", "has_bacnet_device_object_exposed")(ip)
 
 def has_opcua_security(ip):
-    from ics_policy_check import has_opcua_security
-    return has_opcua_security(ip)
+    return _import_from("ics_policy_check", "has_opcua_security")(ip)
 
 def has_opcua_anonymous_access(ip):
-    from ics_exposure_check import has_opcua_anonymous_access
-    return has_opcua_anonymous_access(ip)
+    return _import_from("ics_exposure_check", "has_opcua_anonymous_access")(ip)
 
 def has_opcua_endpoints_exposed(ip):
-    from ics_exposure_check import has_opcua_endpoints_exposed
-    return has_opcua_endpoints_exposed(ip)
+    return _import_from("ics_exposure_check", "has_opcua_endpoints_exposed")(ip)
 
 def has_opcua_signing_disabled(ip):
     # Simplified: if security is disabled, signing is also disabled
     return not has_opcua_security(ip)
 
 def has_iec104_access(ip):
-    from ics_policy_check import has_iec104_access
-    return has_iec104_access(ip)
+    return _import_from("ics_policy_check", "has_iec104_access")(ip)
 
 def has_iec104_write_access(ip):
-    from ics_exposure_check import has_iec104_write_access
-    return has_iec104_write_access(ip)
+    return _import_from("ics_exposure_check", "has_iec104_write_access")(ip)
 
 def check_s7_access_protection(ip):
-    from ics_policy_check import check_s7_policy
+    check_s7_policy = _import_from("ics_policy_check", "check_s7_policy")
     result = check_s7_policy(ip)
     return result.get("auth_type") == "Access Protection Enabled"

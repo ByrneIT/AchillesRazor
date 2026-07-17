@@ -1,6 +1,7 @@
 import socket
 import struct
 import time
+import requests
 from urllib.parse import urlparse, parse_qs
 
 # -----------------------------------------------------------------
@@ -46,9 +47,17 @@ def run_check(target_ip, target_port=None, target_url=None):
     """
     name = "OT/ICS Protocol Redirect Chain and Misconfiguration Check"
 
-    # If URL is provided (web interface), do web-based redirect checks
+    # ics_main dispatches web-style targets by calling check_func(target)
+    # with a single positional argument, so a URL always arrives here as
+    # target_ip rather than the target_url kwarg. Detect it the same way
+    # ics_encryption_check.py and ics_dns_security_check.py do, otherwise
+    # http(s):// targets silently fall through to the OT protocol probes
+    # below (which just fail to connect) and this check never actually
+    # exercises its web-based redirect logic at all.
     if target_url:
         return run_web_check(target_url)
+    if isinstance(target_ip, str) and target_ip.startswith(("http://", "https://")):
+        return run_web_check(target_ip)
 
     # Otherwise, do OT protocol checks
     if target_port is None:

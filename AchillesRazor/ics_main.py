@@ -7,6 +7,7 @@ Runs all OT/ICS security checks and generates reports
 import argparse
 import sys
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from typing import Dict, Any, List, Optional
 
@@ -103,56 +104,77 @@ def run_checks(
     # for any still-running (timed-out) check thread to finish, and Python
     # cannot forcibly kill a blocked thread. Letting the pool go untracked
     # means a hung check's thread is simply abandoned once its timeout fires.
+    #
+    # That abandonment is also why Ctrl+C is handled explicitly below instead
+    # of being left to propagate as a bare KeyboardInterrupt: concurrent.futures
+    # registers a process-exit hook that joins *every* thread any
+    # ThreadPoolExecutor ever created, regardless of whether shutdown() was
+    # called. If a check thread is blocked in a call with no effective
+    # timeout, that join waits forever and the process outlives Ctrl+C. The
+    # only reliable way to kill a background thread stuck in blocking I/O is
+    # to bypass that hook with os._exit(), which tears the whole process down
+    # at the OS level immediately.
     executor = ThreadPoolExecutor(max_workers=max(4, len(check_names) or 1))
 
-    for i, check_name in enumerate(check_names, 1):
-        check_func = ALL_CHECKS[check_name]
+    try:
+        for i, check_name in enumerate(check_names, 1):
+            check_func = ALL_CHECKS[check_name]
 
-        # Always show per-check progress (not just under -v): a default scan
-        # with no responsive OT services can take a few minutes, and with no
-        # feedback at all that reads as a hang rather than normal operation.
-        print(f"[{i}/{len(check_names)}] Running: {check_name}...", end=" ", flush=True)
-
-        try:
-            # Determine how to call the check function
-            if is_url:
-                # Web-style check (takes URL as first arg)
-                future = executor.submit(check_func, target)
-            else:
-                # OT-style check (takes IP and optional port)
-                if port:
-                    future = executor.submit(check_func, target, port)
-                else:
-                    future = executor.submit(check_func, target)
+            # Always show per-check progress (not just under -v): a default scan
+            # with no responsive OT services can take a few minutes, and with no
+            # feedback at all that reads as a hang rather than normal operation.
+            print(f"[{i}/{len(check_names)}] Running: {check_name}...", end=" ", flush=True)
 
             try:
-                result = future.result(timeout=CHECK_TIMEOUT_SECONDS)
-            except FutureTimeoutError:
-                result = {
+                # Determine how to call the check function
+                if is_url:
+                    # Web-style check (takes URL as first arg)
+                    future = executor.submit(check_func, target)
+                else:
+                    # OT-style check (takes IP and optional port)
+                    if port:
+                        future = executor.submit(check_func, target, port)
+                    else:
+                        future = executor.submit(check_func, target)
+
+                try:
+                    result = future.result(timeout=CHECK_TIMEOUT_SECONDS)
+                except FutureTimeoutError:
+                    result = {
+                        "name": check_name,
+                        "status": "error",
+                        "severity": "medium",
+                        "details": f"Check timed out after {CHECK_TIMEOUT_SECONDS}s and was skipped.",
+                        "recommendation": "The target may be unreachable or filtering traffic. Re-run with --type to isolate the slow check."
+                    }
+
+                results.append(result)
+
+                status = result.get("status", "unknown")
+                severity = result.get("severity", "low")
+                print(f"done ({status}/{severity})")
+
+            except KeyboardInterrupt:
+                raise
+
+            except Exception as e:
+                error_result = {
                     "name": check_name,
                     "status": "error",
-                    "severity": "medium",
-                    "details": f"Check timed out after {CHECK_TIMEOUT_SECONDS}s and was skipped.",
-                    "recommendation": "The target may be unreachable or filtering traffic. Re-run with --type to isolate the slow check."
+                    "severity": "high",
+                    "details": str(e),
+                    "recommendation": "Check the target configuration and try again."
                 }
+                results.append(error_result)
 
-            results.append(result)
-
-            status = result.get("status", "unknown")
-            severity = result.get("severity", "low")
-            print(f"done ({status}/{severity})")
-
-        except Exception as e:
-            error_result = {
-                "name": check_name,
-                "status": "error",
-                "severity": "high",
-                "details": str(e),
-                "recommendation": "Check the target configuration and try again."
-            }
-            results.append(error_result)
-
-            print(f"ERROR: {str(e)}")
+                print(f"ERROR: {str(e)}")
+    except KeyboardInterrupt:
+        completed = len(results)
+        print(f"\n\n[!] Scan interrupted by user. {completed}/{len(check_names)} checks completed.")
+        # Hard-exit: a check thread may still be blocked in the pool with no
+        # way to cancel it. os._exit() skips interpreter shutdown (and the
+        # thread-join hook that would hang on it) and kills the process now.
+        os._exit(130)
 
     return results
 
@@ -191,27 +213,31 @@ def scan_network(
 
     all_results = {}
 
-    for ip in ips:
-        if verbose:
-            print(f"\n[*] Scanning {ip}...")
-
-        # Check if device is alive (port scan)
-        alive = False
-        check_ports = ports or DEFAULT_PORTS
-
-        for p in check_ports:
-            if test_port(ip, p):
-                alive = True
-                if verbose:
-                    print(f"    Found OT/ICS device on port {p}")
-                break
-
-        if alive:
-            results = run_checks(ip, None, checks, verbose=False)
-            all_results[ip] = results
-        else:
+    try:
+        for ip in ips:
             if verbose:
-                print("    No OT/ICS devices found")
+                print(f"\n[*] Scanning {ip}...")
+
+            # Check if device is alive (port scan)
+            alive = False
+            check_ports = ports or DEFAULT_PORTS
+
+            for p in check_ports:
+                if test_port(ip, p):
+                    alive = True
+                    if verbose:
+                        print(f"    Found OT/ICS device on port {p}")
+                    break
+
+            if alive:
+                results = run_checks(ip, None, checks, verbose=False)
+                all_results[ip] = results
+            else:
+                if verbose:
+                    print("    No OT/ICS devices found")
+    except KeyboardInterrupt:
+        print(f"\n\n[!] Scan interrupted by user. {len(all_results)}/{len(ips)} hosts completed.")
+        os._exit(130)
 
     return all_results
 
@@ -365,43 +391,71 @@ def main():
     output_format = detect_output_format(output_path, args.format)
     checks = resolve_scan_type(args.scan_type)
 
-    if "/" in target and not target.startswith(("http://", "https://")):
-        print(f"[+] Network scan mode: {target}")
+    scan_start = time.time()
 
-        results = scan_network(
+    try:
+        if "/" in target and not target.startswith(("http://", "https://")):
+            print(f"[+] Network scan mode: {target}")
+
+            results = scan_network(
+                target,
+                ports=[args.port] if args.port else None,
+                checks=checks,
+                verbose=args.verbose,
+            )
+
+            flattened_results = []
+            for ip, ip_results in results.items():
+                for result in ip_results:
+                    if result:
+                        result_copy = result.copy()
+                        result_copy["_target"] = ip
+                        flattened_results.append(result_copy)
+
+            if not flattened_results:
+                print("\n[!] No OT/ICS devices found in network")
+                return 0
+
+            report_target = f"Network: {target} ({len(results)} hosts)"
+            generator = ICSReportGenerator(report_target, start_time=scan_start)
+
+            for result in flattened_results:
+                generator.add_result(result)
+            generator.finish()
+
+            if output_format == "console":
+                output = generator.to_console()
+            elif output_format == "json":
+                output = generator.to_json()
+            elif output_format == "markdown":
+                output = generator.to_markdown()
+            else:
+                output = generator.to_html()
+
+            if output_path and output_path != "-":
+                with open(output_path, "w", encoding="utf-8") as f:
+                    f.write(output)
+                print(f"\n[+] Report saved to: {output_path}")
+            else:
+                print(output)
+
+            return 0
+
+        results = run_checks(
             target,
-            ports=[args.port] if args.port else None,
+            port=args.port,
             checks=checks,
             verbose=args.verbose,
         )
 
-        flattened_results = []
-        for ip, ip_results in results.items():
-            for result in ip_results:
-                if result:
-                    result_copy = result.copy()
-                    result_copy["_target"] = ip
-                    flattened_results.append(result_copy)
-
-        if not flattened_results:
-            print("\n[!] No OT/ICS devices found in network")
-            return 0
-
-        report_target = f"Network: {target} ({len(results)} hosts)"
-        generator = ICSReportGenerator(report_target)
-
-        for result in flattened_results:
-            generator.add_result(result)
-        generator.finish()
-
         if output_format == "console":
-            output = generator.to_console()
+            output = create_report(target, results, "console", start_time=scan_start)
         elif output_format == "json":
-            output = generator.to_json()
+            output = create_report(target, results, "json", start_time=scan_start)
         elif output_format == "markdown":
-            output = generator.to_markdown()
+            output = create_report(target, results, "markdown", start_time=scan_start)
         else:
-            output = generator.to_html()
+            output = create_report(target, results, "html", start_time=scan_start)
 
         if output_path and output_path != "-":
             with open(output_path, "w", encoding="utf-8") as f:
@@ -412,30 +466,13 @@ def main():
 
         return 0
 
-    results = run_checks(
-        target,
-        port=args.port,
-        checks=checks,
-        verbose=args.verbose,
-    )
-
-    if output_format == "console":
-        output = create_report(target, results, "console")
-    elif output_format == "json":
-        output = create_report(target, results, "json")
-    elif output_format == "markdown":
-        output = create_report(target, results, "markdown")
-    else:
-        output = create_report(target, results, "html")
-
-    if output_path and output_path != "-":
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(output)
-        print(f"\n[+] Report saved to: {output_path}")
-    else:
-        print(output)
-
-    return 0
+    except KeyboardInterrupt:
+        # run_checks()/scan_network() already handle their own interrupts and
+        # os._exit() directly (see their comments for why). This is a
+        # safety net for interrupts landing outside those calls, e.g. during
+        # report generation or the output file write.
+        print("\n\n[!] Scan interrupted by user.")
+        os._exit(130)
 
 
 if __name__ == "__main__":

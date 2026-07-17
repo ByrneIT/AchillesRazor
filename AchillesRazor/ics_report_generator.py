@@ -22,11 +22,14 @@ class ICSReportGenerator:
         "reset": "\033[0m",            # Reset
     }
 
-    def __init__(self, target: str, checks: List[str] = None):
+    def __init__(self, target: str, checks: List[str] = None, start_time: Optional[float] = None):
         self.target = target
         self.checks = checks or []
         self.results = []
-        self.start_time = time.time()
+        # Defaults to construction time, but callers that build the report
+        # only after the scan has finished (create_report/save_report) should
+        # pass the scan's actual start time, or duration always reads ~0.00s.
+        self.start_time = start_time if start_time is not None else time.time()
         self.end_time = None
 
     def add_result(self, result: Dict[str, Any]) -> None:
@@ -415,11 +418,15 @@ class ICSReportGenerator:
 # Convenience Functions
 # ======================================================================
 
-def create_report(target: str, results: List[Dict[str, Any]], output_format: str = "console") -> str:
+def create_report(target: str, results: List[Dict[str, Any]], output_format: str = "console", start_time: Optional[float] = None) -> str:
     """
     Quick helper to create a report from a list of results
+
+    start_time: pass the actual scan start time (e.g. time.time() captured
+    before running checks) so the report's duration reflects the real scan
+    time rather than the negligible time spent building the report itself.
     """
-    generator = ICSReportGenerator(target)
+    generator = ICSReportGenerator(target, start_time=start_time)
     for result in results:
         generator.add_result(result)
     generator.finish()
@@ -434,11 +441,11 @@ def create_report(target: str, results: List[Dict[str, Any]], output_format: str
         return generator.to_console()
 
 
-def save_report(target: str, results: List[Dict[str, Any]], filepath: str, format: str = "console") -> None:
+def save_report(target: str, results: List[Dict[str, Any]], filepath: str, format: str = "console", start_time: Optional[float] = None) -> None:
     """
     Quick helper to save a report to file
     """
-    generator = ICSReportGenerator(target)
+    generator = ICSReportGenerator(target, start_time=start_time)
     for result in results:
         generator.add_result(result)
     generator.finish()
